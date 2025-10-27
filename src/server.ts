@@ -116,3 +116,22 @@ server.listen(port, () => {
 });
 
 
+// Keepalive pinger (optional): set KEEPALIVE_URL to your public /health URL
+const keepAliveUrl = process.env.KEEPALIVE_URL;
+const keepAliveIntervalMs = Number(process.env.KEEPALIVE_INTERVAL_MS ?? 240000); // 4 min default
+if (keepAliveUrl) {
+  // eslint-disable-next-line no-console
+  console.log(`keepalive enabled → ${keepAliveUrl} every ${keepAliveIntervalMs}ms`);
+  setInterval(() => {
+    // Use global fetch (Node >=18)
+    fetch(keepAliveUrl, { method: 'GET', cache: 'no-store' })
+      .then(() => {
+        /* no-op */
+      })
+      .catch(() => {
+        /* ignore keepalive errors */
+      });
+  }, keepAliveIntervalMs);
+}
+
+
