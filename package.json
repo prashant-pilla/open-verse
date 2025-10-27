@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "echo 'Build not needed - using ts-node'",
-    "start": "./start-server.sh",
+    "start": "node server-launcher.js",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write .",
     "ping:alpaca": "ts-node src/scripts/pingAlpacaPaper.ts",
