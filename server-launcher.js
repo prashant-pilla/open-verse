@@ -13,6 +13,6 @@ require('ts-node').register({
   }
 });
 
-// Now require the TypeScript server file
-require('./src/server.ts');
+// Now require the TypeScript server file using absolute path
+require(path.join(__dirname, 'src', 'server.ts'));
 
