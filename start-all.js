@@ -6,16 +6,16 @@ const path = require('path');
 // Change to script directory
 process.chdir(__dirname);
 
-// Start server in background
+// Start server in background (run compiled JS)
 console.log('Starting API server...');
-const server = spawn('node', ['server-launcher.js'], {
+const server = spawn('node', [path.join(__dirname, 'dist', 'server.js')], {
   stdio: 'inherit',
   detached: false
 });
 
 function startOrchestrator() {
   console.log('Starting orchestrator...');
-  const orchestrator = spawn('node', ['-r', 'ts-node/register', path.join(__dirname, 'src', 'index.ts')], {
+  const orchestrator = spawn('node', [path.join(__dirname, 'dist', 'index.js')], {
     stdio: 'inherit',
     detached: false
   });

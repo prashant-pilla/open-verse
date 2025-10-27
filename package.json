@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "ts-node src/index.ts",
-    "build": "echo 'Build not needed - using ts-node'",
+    "build": "tsc -p .",
     "start": "node start-all.js",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write .",
