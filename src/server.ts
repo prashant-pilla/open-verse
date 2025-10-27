@@ -81,11 +81,27 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify(spxCache.payload));
         return;
       }
-      // Use Yahoo Finance chart API for ^GSPC (S&P 500 index); fallback to SPY if needed
-      const url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1m&range=1d';
-      const r = await fetch(url, { method: 'GET' });
-      if (!r.ok) throw new Error(`upstream ${r.status}`);
-      const j = await r.json();
+      // Use Yahoo Finance chart API. Try ^GSPC first, then fall back to SPY.
+      async function fetchChart(sym: string) {
+        const h: Record<string, string> = {
+          'accept': 'application/json',
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+        };
+        const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1m&range=1d&region=US`;
+        const resp = await fetch(u, { method: 'GET', headers: h });
+        if (!resp.ok) throw new Error(`upstream ${resp.status}`);
+        return resp.json();
+      }
+
+      let payloadSym = '^GSPC';
+      let j: any;
+      try {
+        j = await fetchChart('%5EGSPC');
+      } catch {
+        // fallback to SPY ETF
+        payloadSym = 'SPY';
+        j = await fetchChart('SPY');
+      }
       const result = j?.chart?.result?.[0];
       const close: number[] = result?.indicators?.quote?.[0]?.close || [];
       const ts: number[] = result?.timestamp || [];
@@ -93,14 +109,20 @@ const server = http.createServer(async (req, res) => {
       const first = prices.find((v) => Number.isFinite(v));
       const last = prices[prices.length - 1];
       const changePct = first && last ? ((last / first) - 1) * 100 : 0;
-      const payload = { symbol: '^GSPC', prices, timestamps: ts, changePct };
+      const payload = { symbol: payloadSym, prices, timestamps: ts, changePct };
       spxCache.ts = nowMs;
       spxCache.payload = payload;
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=15' });
       res.end(JSON.stringify(payload));
     } catch (e) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'spx_fetch_failed' }));
+      if (spxCache.payload) {
+        // serve stale if available
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=15' });
+        res.end(JSON.stringify(spxCache.payload));
+      } else {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'spx_fetch_failed' }));
+      }
     }
     return;
   }
