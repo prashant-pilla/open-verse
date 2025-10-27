@@ -6,9 +6,9 @@ const path = require('path');
 // Change to script directory
 process.chdir(__dirname);
 
-// Start server in background (run compiled JS)
+// Start server in background via ts-node launcher (resolves TS paths reliably)
 console.log('Starting API server...');
-const server = spawn('node', [path.join(__dirname, 'dist', 'server.js')], {
+const server = spawn('node', [path.join(__dirname, 'server-launcher.js')], {
   stdio: 'inherit',
   detached: false
 });
