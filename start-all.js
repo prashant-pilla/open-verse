@@ -15,7 +15,7 @@ const server = spawn('node', [path.join(__dirname, 'server-launcher.js')], {
 
 function startOrchestrator() {
   console.log('Starting orchestrator...');
-  const orchestrator = spawn('node', ['-r', 'ts-node/register', path.join(__dirname, 'src', 'index.ts')], {
+  const orchestrator = spawn('node', [path.join(__dirname, 'orchestrator-launcher.js')], {
     stdio: 'inherit',
     detached: false
   });
