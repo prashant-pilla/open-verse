@@ -26,6 +26,26 @@ async function fetchJSON<T>(path: string): Promise<T> {
   return res.json()
 }
 
+function useSpx() {
+  const [data, setData] = useState<{ prices: number[]; timestamps: number[]; changePct: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      try {
+        const d = await fetchJSON<{ prices: number[]; timestamps: number[]; changePct: number }>(`/spx`)
+        if (mounted) setData(d)
+      } catch (e) {
+        if (mounted) setError('failed')
+      }
+    }
+    load()
+    const id = setInterval(load, 30000)
+    return () => { mounted = false; clearInterval(id) }
+  }, [])
+  return { data, error }
+}
+
 function useArenaData(refreshMs: number) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([])
   const [pnl, setPnl] = useState<Record<string, number>>({})
@@ -67,6 +87,7 @@ function useArenaData(refreshMs: number) {
 
 function App() {
   const { leaderboard, pnl, orders, loading, error } = useArenaData(5000)
+  const { data: spx } = useSpx()
   const { scrollYProgress } = useScroll()
   const headerY = useTransform(scrollYProgress, [0, 0.1], [0, -10])
   const headerOpacity = useTransform(scrollYProgress, [0, 0.1], [1, 0.8])
@@ -101,6 +122,16 @@ function App() {
             animate={{ opacity: 1, x: 0 }}
             className="flex items-center gap-3"
           >
+            {spx && (
+              <div className="hidden md:flex items-center gap-3 mr-4">
+                <div className={`font-mono text-xs ${spx.changePct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  S&P: {spx.changePct >= 0 ? '+' : ''}{spx.changePct.toFixed(2)}%
+                </div>
+                <div className="w-32 h-6 opacity-80">
+                  <Sparkline data={spx.prices.slice(-50)} color={spx.changePct >= 0 ? '#34d399' : '#f87171'} />
+                </div>
+              </div>
+            )}
             <div className="text-sm text-neutral-500 hidden sm:block font-mono text-xs">PAPER TRADING</div>
             <ThemeToggle />
           </motion.div>

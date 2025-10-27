@@ -18,6 +18,14 @@ const server = http.createServer(async (req, res) => {
   
   const parsed = url.parse(req.url ?? '/', true);
   const pathname = (parsed.pathname ?? '/').replace(/^\/+/, '/');
+  
+  // Lightweight in-memory cache for SPX data
+  // Cache structure: { ts: number, payload: any }
+  // 30s TTL to avoid hammering the upstream
+  const nowMs = Date.now();
+  (global as any).__spxCache = (global as any).__spxCache || { ts: 0, payload: null };
+  const spxCache = (global as any).__spxCache as { ts: number; payload: unknown };
+
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
@@ -63,6 +71,37 @@ const server = http.createServer(async (req, res) => {
     const rows = getRecentOrders(50);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ rows }));
+    return;
+  }
+  
+  if (pathname === '/spx') {
+    try {
+      if (spxCache.payload && nowMs - spxCache.ts < 30_000) {
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=15' });
+        res.end(JSON.stringify(spxCache.payload));
+        return;
+      }
+      // Use Yahoo Finance chart API for ^GSPC (S&P 500 index); fallback to SPY if needed
+      const url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1m&range=1d';
+      const r = await fetch(url, { method: 'GET' });
+      if (!r.ok) throw new Error(`upstream ${r.status}`);
+      const j = await r.json();
+      const result = j?.chart?.result?.[0];
+      const close: number[] = result?.indicators?.quote?.[0]?.close || [];
+      const ts: number[] = result?.timestamp || [];
+      const prices = close.filter((v: number | null) => typeof v === 'number') as number[];
+      const first = prices.find((v) => Number.isFinite(v));
+      const last = prices[prices.length - 1];
+      const changePct = first && last ? ((last / first) - 1) * 100 : 0;
+      const payload = { symbol: '^GSPC', prices, timestamps: ts, changePct };
+      spxCache.ts = nowMs;
+      spxCache.payload = payload;
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=15' });
+      res.end(JSON.stringify(payload));
+    } catch (e) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'spx_fetch_failed' }));
+    }
     return;
   }
   if (pathname === '/' || pathname === '/dashboard') {
