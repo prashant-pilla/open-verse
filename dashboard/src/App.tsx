@@ -17,7 +17,7 @@ import { Sparkline } from './components/Sparkline'
 type LeaderboardRow = { model: string; equity_usd: number; ts: number }
 type OrdersRow = { ts: number; model: string; symbol: string; side: string; notional_usd: number; status: string }
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://open-verse.onrender.com').replace(/\/+$/, '')
 
 async function fetchJSON<T>(path: string): Promise<T> {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
