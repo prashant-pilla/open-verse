@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import pino from 'pino';
-import { Orchestrator } from './orchestrator.ts';
+import { Orchestrator } from './orchestrator';
 import { loadConfig } from './config';
 import { loadModelsFromEnv } from './modelLoader';
 
