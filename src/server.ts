@@ -17,18 +17,19 @@ const server = http.createServer(async (req, res) => {
   }
   
   const parsed = url.parse(req.url ?? '/', true);
-  if (parsed.pathname === '/health') {
+  const pathname = (parsed.pathname ?? '/').replace(/^\/+/, '/');
+  if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
     return;
   }
-  if (parsed.pathname === '/leaderboard') {
+  if (pathname === '/leaderboard') {
     const rows = getLatestEquityByModel();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ rows }));
     return;
   }
-  if (parsed.pathname === '/pnl') {
+  if (pathname === '/pnl') {
     // realized PnL per model via FIFO within symbol (simplified)
     const fills = getFillsOrdered();
     const pos: Record<string, { qty: number; cost: number }> = {};
@@ -58,13 +59,13 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ realized }));
     return;
   }
-  if (parsed.pathname === '/orders') {
+  if (pathname === '/orders') {
     const rows = getRecentOrders(50);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ rows }));
     return;
   }
-  if (parsed.pathname === '/' || parsed.pathname === '/dashboard') {
+  if (pathname === '/' || pathname === '/dashboard') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(
       '<!doctype html>' +
