@@ -13,18 +13,23 @@ const server = spawn('node', ['server-launcher.js'], {
   detached: false
 });
 
-// Wait a bit for server to start
-setTimeout(() => {
+function startOrchestrator() {
   console.log('Starting orchestrator...');
-  const orchestrator = spawn('npx', ['ts-node', 'src/index.ts'], {
+  const orchestrator = spawn('node', ['-r', 'ts-node/register', path.join(__dirname, 'src', 'index.ts')], {
     stdio: 'inherit',
     detached: false
   });
 
   orchestrator.on('exit', (code) => {
     console.log(`Orchestrator exited with code ${code}`);
-    process.exit(code);
+    // Respawn after short delay without exiting the whole process
+    setTimeout(() => startOrchestrator(), 5000);
   });
+}
+
+// Wait a bit for server to start
+setTimeout(() => {
+  startOrchestrator();
 }, 3000);
 
 server.on('exit', (code) => {
