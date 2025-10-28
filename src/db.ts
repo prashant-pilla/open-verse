@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { initPg, ensureSchema, pgInsertMarketSnapshot, pgInsertOrder, pgInsertEquitySnapshot, pgInsertFill, pgUpsertClientOrderMap, pgSetMeta } from './pg';
 
 const DB_PATH = path.join(process.cwd(), 'data', 'arena.sqlite');
 
@@ -58,6 +59,13 @@ export function initDb(): void {
       value TEXT NOT NULL
     );
   `);
+  // Initialize optional Postgres mirror
+  try {
+    initPg();
+    void ensureSchema();
+  } catch {
+    // ignore pg init errors; mirror is optional
+  }
 }
 
 function getDb(): Database.Database {
@@ -71,6 +79,7 @@ export function recordMarketSnapshot(ts: number, symbol: string, price: number):
   d.prepare(
     `INSERT INTO market_snapshots (ts, symbol, price) VALUES (?, ?, ?)`,
   ).run(ts, symbol, price);
+  void pgInsertMarketSnapshot(ts, symbol, price).catch(() => {});
 }
 
 export function recordOrder(
@@ -87,6 +96,7 @@ export function recordOrder(
     `INSERT INTO orders (ts, model, symbol, side, notional_usd, status, order_id)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(ts, model, symbol, side, notionalUsd, status, orderId ?? null);
+  void pgInsertOrder(ts, model, symbol, side, notionalUsd, status, orderId).catch(() => {});
 }
 
 export function upsertClientOrderMap(clientId: string, model: string, symbol: string): void {
@@ -96,6 +106,7 @@ export function upsertClientOrderMap(clientId: string, model: string, symbol: st
      VALUES (?, ?, ?)
      ON CONFLICT(client_id) DO UPDATE SET model=excluded.model, symbol=excluded.symbol`,
   ).run(clientId, model, symbol);
+  void pgUpsertClientOrderMap(clientId, model, symbol).catch(() => {});
 }
 
 export function getLastFillTimestamp(): number {
@@ -112,6 +123,7 @@ export function setLastFillTimestamp(iso: string): void {
     `INSERT INTO meta (key, value) VALUES ('last_fill_iso', ?)
      ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
   ).run(iso);
+  void pgSetMeta('last_fill_iso', iso).catch(() => {});
 }
 
 export function recordFill(
@@ -127,6 +139,7 @@ export function recordFill(
     `INSERT INTO fills (ts, model, symbol, side, qty, price)
      VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(ts, model, symbol, side, qty, price);
+  void pgInsertFill(ts, model, symbol, side, qty, price).catch(() => {});
 }
 
 export function findModelForClientOrder(clientId: string): { model: string; symbol: string } | null {
@@ -193,6 +206,7 @@ export function recordEquitySnapshot(ts: number, model: string, equityUsd: numbe
   d.prepare(
     `INSERT INTO equity_snapshots (ts, model, equity_usd) VALUES (?, ?, ?)`,
   ).run(ts, model, equityUsd);
+  void pgInsertEquitySnapshot(ts, model, equityUsd).catch(() => {});
 }
 
 export function getLatestEquityByModel(): Array<{ model: string; equity_usd: number; ts: number }>
