@@ -1,4 +1,8 @@
 import { Pool } from 'pg';
+import dns from 'dns';
+
+// Prefer IPv4 to avoid ENETUNREACH on hosts without IPv6
+try { dns.setDefaultResultOrder('ipv4first'); } catch { /* ignore */ }
 
 let pool: Pool | null = null;
 
@@ -17,7 +21,8 @@ function getPool(): Pool | null {
 export async function ensureSchema(): Promise<void> {
   const p = getPool();
   if (!p) return;
-  await p.query(`
+  try {
+    await p.query(`
     CREATE TABLE IF NOT EXISTS market_snapshots (
       ts BIGINT NOT NULL,
       symbol TEXT NOT NULL,
@@ -64,6 +69,9 @@ export async function ensureSchema(): Promise<void> {
       value TEXT NOT NULL
     );
   `);
+  } catch {
+    // Swallow mirror init errors; primary store remains SQLite
+  }
 }
 
 export async function pgInsertMarketSnapshot(ts: number, symbol: string, price: number): Promise<void> {
