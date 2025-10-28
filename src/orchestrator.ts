@@ -165,34 +165,34 @@ export class Orchestrator {
     const fills = getFillsOrdered();
     const priceBySymbol = new Map<string, number>();
     for (const m of markets) priceBySymbol.set(m.symbol.toUpperCase(), m.price);
-    const cashByModel = new Map<string, number>();
-    const qtyByModelSymbol = new Map<string, Map<string, number>>();
+    const eqCashByModel = new Map<string, number>();
+    const eqQtyByModelSymbol = new Map<string, Map<string, number>>();
     for (const id of this.cfg.modelList) {
-      cashByModel.set(id, this.cfg.STARTING_CASH_PER_MODEL);
-      qtyByModelSymbol.set(id, new Map());
+      eqCashByModel.set(id, this.cfg.STARTING_CASH_PER_MODEL);
+      eqQtyByModelSymbol.set(id, new Map());
     }
     for (const f of fills) {
       if (!f.model || f.model === 'unknown') continue;
-      if (!cashByModel.has(f.model)) {
-        cashByModel.set(f.model, this.cfg.STARTING_CASH_PER_MODEL);
-        qtyByModelSymbol.set(f.model, new Map());
+      if (!eqCashByModel.has(f.model)) {
+        eqCashByModel.set(f.model, this.cfg.STARTING_CASH_PER_MODEL);
+        eqQtyByModelSymbol.set(f.model, new Map());
       }
       const symbol = f.symbol.toUpperCase();
-      const qtyMap = qtyByModelSymbol.get(f.model)!;
+      const qtyMap = eqQtyByModelSymbol.get(f.model)!;
       const prevQty = qtyMap.get(symbol) ?? 0;
       const tradeQty = Number(f.qty);
       const tradeValue = tradeQty * Number(f.price);
       if (f.side === 'buy') {
         qtyMap.set(symbol, prevQty + tradeQty);
-        cashByModel.set(f.model, (cashByModel.get(f.model) ?? 0) - tradeValue);
+        eqCashByModel.set(f.model, (eqCashByModel.get(f.model) ?? 0) - tradeValue);
       } else {
         qtyMap.set(symbol, prevQty - tradeQty);
-        cashByModel.set(f.model, (cashByModel.get(f.model) ?? 0) + tradeValue);
+        eqCashByModel.set(f.model, (eqCashByModel.get(f.model) ?? 0) + tradeValue);
       }
     }
     for (const id of this.cfg.modelList) {
-      const qtyMap = qtyByModelSymbol.get(id) ?? new Map();
-      let equity = cashByModel.get(id) ?? this.cfg.STARTING_CASH_PER_MODEL;
+      const qtyMap = eqQtyByModelSymbol.get(id) ?? new Map();
+      let equity = eqCashByModel.get(id) ?? this.cfg.STARTING_CASH_PER_MODEL;
       for (const [sym, q] of qtyMap.entries()) {
         const px = priceBySymbol.get(sym) ?? 0;
         equity += q * px;
