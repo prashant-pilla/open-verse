@@ -14,6 +14,7 @@ export interface LLMAdapter {
     positions: Record<string, number>;
     maxOrderUsd: number;
     maxPositionUsd: number;
+    memory?: { summary?: string; lastSeenTs?: number };
   }): Promise<LLMOrderIntent[]>;
 }
 
