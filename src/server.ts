@@ -4,6 +4,7 @@ import url from 'url';
 import fs from 'fs';
 import path from 'path';
 import { getLatestEquityByModel, getFillsOrdered, getRecentOrders } from './db';
+import { pgHealth } from './pg';
 import { loadConfig } from './config';
 import { loadModelsFromEnv } from './modelLoader';
 
@@ -31,8 +32,9 @@ const server = http.createServer(async (req, res) => {
   const spxCache = (global as any).__spxCache as { ts: number; payload: unknown };
 
   if (pathname === '/health') {
+    const db = await pgHealth();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, pg: db }));
     return;
   }
   if (pathname === '/leaderboard') {

@@ -139,4 +139,15 @@ export async function pgSetMeta(key: string, value: string): Promise<void> {
   );
 }
 
+export async function pgHealth(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const p = getPool();
+    if (!p) return { ok: false, error: 'no_pool' };
+    await p.query('SELECT 1');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 
