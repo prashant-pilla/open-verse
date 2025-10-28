@@ -31,9 +31,11 @@ export function loadModelsFromEnv(modelIds: string[]): ModelAdapter[] {
         continue;
       }
       const llm = createOpenAIAdapter(id, key, model, endpoint);
+      logger.info({ id, provider, model, endpoint: endpoint.includes('openrouter') ? 'openrouter' : 'openai' }, 'loaded LLM model');
       models.push(createLLMBackedModel(id, llm));
     } else if (provider === 'mock') {
       const llm = createMockAdapter(id);
+      logger.info({ id, provider: 'mock' }, 'loaded mock LLM model');
       models.push(createLLMBackedModel(id, llm));
     } else {
       logger.warn({ id, provider }, 'unknown provider; using momentum bot');

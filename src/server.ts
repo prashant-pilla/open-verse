@@ -4,6 +4,8 @@ import url from 'url';
 import fs from 'fs';
 import path from 'path';
 import { getLatestEquityByModel, getFillsOrdered, getRecentOrders } from './db';
+import { loadConfig } from './config';
+import { loadModelsFromEnv } from './modelLoader';
 
 const server = http.createServer(async (req, res) => {
   // Enable CORS for all requests
@@ -37,6 +39,13 @@ const server = http.createServer(async (req, res) => {
     const rows = getLatestEquityByModel();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ rows }));
+    return;
+  }
+  if (pathname === '/status/models') {
+    const cfg = loadConfig();
+    const models = loadModelsFromEnv(cfg.modelList).map((m) => m.id);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ models }));
     return;
   }
   if (pathname === '/backup/sqlite' || pathname === '/backup/sqlite/') {

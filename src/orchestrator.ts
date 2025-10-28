@@ -100,21 +100,25 @@ export class Orchestrator {
         } else {
           try {
             const clientId = `ov-${model.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-            // If queuing off-hours is enabled, use BUY limit GTC qty=1 at current price
+            const px = price;
             if (this.cfg.queueOffHours || !clock.is_open) {
-              const px = price;
-              const qty = 1;
-              const resp = await placeLimitOrderGTC(it.symbol, 'buy', px, qty, clientId);
-              this.logger.info({ model: model.id, orderId: resp.id, it }, 'queued GTC limit');
+              const allowSell = currentQty > 0;
+              if (it.side === 'sell' && !allowSell) {
+                this.logger.warn({ model: model.id, it }, 'skip off-hours sell: no position');
+                continue;
+              }
+              const side: 'buy' | 'sell' = it.side;
+              const qty = side === 'buy' ? 1 : Math.max(1, Math.floor(Math.min(currentQty, deltaQty)));
               upsertClientOrderMap(clientId, model.id, it.symbol);
-              recordOrder(now, model.id, it.symbol, 'buy', px * qty, resp.status, resp.id);
+              const resp = await placeLimitOrderGTC(it.symbol, side, px, qty, clientId);
+              this.logger.info({ model: model.id, orderId: resp.id, it }, 'queued GTC limit');
+              recordOrder(now, model.id, it.symbol, side, px * qty, resp.status, resp.id);
             } else {
-              // Queue as limit GTC at current price; approximate qty = notional/price
-              const px = price;
+              // Market hours: respect side and approximate qty = notional/price
               const qty = Math.max(1, Math.floor(it.notionalUsd / Math.max(px, 1e-6)));
+              upsertClientOrderMap(clientId, model.id, it.symbol);
               const resp = await placeLimitOrderGTC(it.symbol, it.side, px, qty, clientId);
               this.logger.info({ model: model.id, orderId: resp.id, it }, 'placed order');
-              upsertClientOrderMap(clientId, model.id, it.symbol);
               recordOrder(now, model.id, it.symbol, it.side, px * qty, resp.status, resp.id);
             }
           } catch (err) {
