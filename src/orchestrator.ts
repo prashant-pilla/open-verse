@@ -39,17 +39,42 @@ export class Orchestrator {
     }
     for (const m of markets) recordMarketSnapshot(now, m.symbol, m.price);
 
+    // Account-level positions (for drift checks only)
     const alpacaPositions = await getPositions().catch(() => []);
-    const posMap = new Map<string, number>();
+    const accountPosMap = new Map<string, number>();
     for (const p of alpacaPositions) {
       const qty = Number(p.qty);
       if (!Number.isFinite(qty)) continue;
-      posMap.set(p.symbol.toUpperCase(), qty * (p.side === 'short' ? -1 : 1));
+      accountPosMap.set(p.symbol.toUpperCase(), qty * (p.side === 'short' ? -1 : 1));
     }
-    const positions: PositionSnapshot[] = this.cfg.symbolList.map((symbol) => ({
-      symbol,
-      qty: posMap.get(symbol.toUpperCase()) ?? 0,
-    }));
+
+    // Per-model virtual portfolios from fills (source of truth for model decisions)
+    const fillsForPositions = getFillsOrdered();
+    const cashByModel = new Map<string, number>();
+    const qtyByModelSymbol = new Map<string, Map<string, number>>();
+    for (const id of this.cfg.modelList) {
+      cashByModel.set(id, this.cfg.STARTING_CASH_PER_MODEL);
+      qtyByModelSymbol.set(id, new Map());
+    }
+    for (const f of fillsForPositions) {
+      if (!f.model || f.model === 'unknown') continue;
+      if (!cashByModel.has(f.model)) {
+        cashByModel.set(f.model, this.cfg.STARTING_CASH_PER_MODEL);
+        qtyByModelSymbol.set(f.model, new Map());
+      }
+      const symbol = f.symbol.toUpperCase();
+      const qtyMap = qtyByModelSymbol.get(f.model)!;
+      const prevQty = qtyMap.get(symbol) ?? 0;
+      const tradeQty = Number(f.qty);
+      const tradeValue = tradeQty * Number(f.price);
+      if (f.side === 'buy') {
+        qtyMap.set(symbol, prevQty + tradeQty);
+        cashByModel.set(f.model, (cashByModel.get(f.model) ?? 0) - tradeValue);
+      } else {
+        qtyMap.set(symbol, prevQty - tradeQty);
+        cashByModel.set(f.model, (cashByModel.get(f.model) ?? 0) + tradeValue);
+      }
+    }
 
     // check market clock once per tick
     const clock = await getClock().catch(() => ({ is_open: true }));
@@ -69,9 +94,15 @@ export class Orchestrator {
       }
       try {
         const prevState = getModelState(model.id);
+        // Build per-model positions for this model only
+        const modelQtyMap = qtyByModelSymbol.get(model.id) ?? new Map<string, number>();
+        const modelPositions: PositionSnapshot[] = this.cfg.symbolList.map((symbol) => ({
+          symbol,
+          qty: modelQtyMap.get(symbol.toUpperCase()) ?? 0,
+        }));
         intents = await model.onDecision({
           markets,
-          positions,
+          positions: modelPositions,
           maxOrderUsd: this.cfg.MAX_ORDER_USD,
           maxPositionUsd: this.cfg.MAX_POSITION_USD,
         });
@@ -86,7 +117,8 @@ export class Orchestrator {
       }
       for (const it of intents) {
         // enforce position cap approximately by skipping if would exceed
-        const currentQty = positions.find((p) => p.symbol === it.symbol)?.qty ?? 0;
+        // Use per-model quantity, not account-level
+        const currentQty = (qtyByModelSymbol.get(model.id)?.get(it.symbol.toUpperCase())) ?? 0;
         const price = markets.find((m) => m.symbol === it.symbol)?.price ?? 0;
         const deltaQty = it.notionalUsd / Math.max(price, 1e-6);
         const nextExposureUsd = Math.abs((currentQty + (it.side === 'buy' ? deltaQty : -deltaQty)) * price);
