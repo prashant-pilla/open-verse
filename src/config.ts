@@ -16,6 +16,10 @@ const configSchema = z.object({
   DRY_RUN: z.string().optional(),
   LLM_MIN_CALL_INTERVAL_MS: z.coerce.number().int().positive().default(300000),
   QUEUE_OFF_HOURS: z.string().optional(),
+  ENABLE_MODEL_MEMORY: z.string().optional(),
+  CONTEXT_MAX_ITEMS: z.coerce.number().int().positive().default(50),
+  SUMMARY_MAX_TOKENS: z.coerce.number().int().positive().default(256),
+  PRICE_CONCURRENCY: z.coerce.number().int().positive().default(8),
 });
 
 export type AppConfig = z.infer<typeof configSchema> & {
@@ -23,6 +27,7 @@ export type AppConfig = z.infer<typeof configSchema> & {
   modelList: string[];
   dryRun: boolean;
   queueOffHours: boolean;
+  enableModelMemory: boolean;
 };
 
 export function loadConfig(): AppConfig {
@@ -33,10 +38,17 @@ export function loadConfig(): AppConfig {
   const cfg = parsed.data;
   return {
     ...cfg,
-    symbolList: cfg.SYMBOLS.split(',').map((s) => s.trim()).filter(Boolean),
+    symbolList: Array.from(
+      new Set(
+        cfg.SYMBOLS.split(',')
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ),
     modelList: cfg.MODELS.split(',').map((s) => s.trim()).filter(Boolean),
     dryRun: (cfg.DRY_RUN ?? 'false').toLowerCase() === 'true',
     queueOffHours: (cfg.QUEUE_OFF_HOURS ?? 'false').toLowerCase() === 'true',
+    enableModelMemory: (cfg.ENABLE_MODEL_MEMORY ?? 'false').toLowerCase() === 'true',
   };
 }
 

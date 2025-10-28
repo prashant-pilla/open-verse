@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import http from 'http';
 import url from 'url';
+import fs from 'fs';
+import path from 'path';
 import { getLatestEquityByModel, getFillsOrdered, getRecentOrders } from './db';
 
 const server = http.createServer(async (req, res) => {
@@ -37,6 +39,26 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ rows }));
     return;
   }
+  if (pathname === '/backup/sqlite' || pathname === '/backup/sqlite/') {
+    try {
+      const dbPath = path.join(process.cwd(), 'data', 'arena.sqlite');
+      if (!fs.existsSync(dbPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not_found' }));
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="arena.sqlite"',
+        'Cache-Control': 'no-store',
+      });
+      fs.createReadStream(dbPath).pipe(res);
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'backup_failed' }));
+    }
+    return;
+  }
   if (pathname === '/pnl') {
     // realized PnL per model via FIFO within symbol (simplified)
     const fills = getFillsOrdered();
@@ -71,6 +93,24 @@ const server = http.createServer(async (req, res) => {
     const rows = getRecentOrders(50);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ rows }));
+    return;
+  }
+  if (pathname === '/positions') {
+    // derive open positions and cash per model from fills
+    const fills = getFillsOrdered();
+    const qty: Record<string, Record<string, number>> = {};
+    const cash: Record<string, number> = {};
+    for (const f of fills) {
+      const m = f.model || 'unknown';
+      qty[m] ||= {};
+      cash[m] ||= 0;
+      const sym = f.symbol.toUpperCase();
+      qty[m][sym] ||= 0;
+      if (f.side === 'buy') { qty[m][sym] += f.qty; cash[m] -= f.qty * f.price; }
+      else { qty[m][sym] -= f.qty; cash[m] += f.qty * f.price; }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ qty, cash }));
     return;
   }
   

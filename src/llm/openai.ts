@@ -9,10 +9,10 @@ export function createOpenAIAdapter(
 ): LLMAdapter {
   return {
     id,
-    async decide({ symbols, prices, positions, maxOrderUsd, maxPositionUsd }) {
+    async decide({ symbols, prices, positions, maxOrderUsd, maxPositionUsd, memory }) {
       const system =
-        'You are a trading agent with strict token and rate limits. Only respond with a compact JSON array of order intents: [{"symbol":"SYM","side":"buy|sell","notionalUsd":N}]. Use minimal tokens, plan fewer trades, and set stop-loss/take-profit implicitly via smaller notional sizes and less frequent entries. If no action, return []. Never include explanations.';
-      const user = JSON.stringify({ symbols, prices, positions, maxOrderUsd, maxPositionUsd });
+        'You are a trading agent with strict token and rate limits. Only respond with a compact JSON array of order intents: [{"symbol":"SYM","side":"buy|sell","notionalUsd":N}]. Use minimal tokens; if no action, return []. No explanations.';
+      const user = JSON.stringify({ symbols, prices, positions, maxOrderUsd, maxPositionUsd, memory });
       const isOpenRouter = endpoint.includes('openrouter.ai');
       const client = new OpenAI({
         apiKey,

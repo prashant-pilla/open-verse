@@ -2,7 +2,7 @@ import pino from 'pino';
 import { loadConfig } from './config';
 import { getLatestPrice, getPositions, placeMarketOrderNotional, listFillsSince, placeLimitOrderGTC, getClock } from './exchanges/alpaca';
 import type { ModelAdapter, MarketSnapshot, PositionSnapshot } from './models/types';
-import { initDb, recordEquitySnapshot, recordMarketSnapshot, recordOrder, upsertClientOrderMap, getLastFillTimestamp, setLastFillTimestamp, recordFill } from './db';
+import { initDb, recordEquitySnapshot, recordMarketSnapshot, recordOrder, upsertClientOrderMap, getLastFillTimestamp, setLastFillTimestamp, recordFill, findModelForClientOrder, getFillsOrdered, getModelState, updateModelState } from './db';
 
 export class Orchestrator {
   private readonly logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
@@ -18,9 +18,25 @@ export class Orchestrator {
 
   async tick(): Promise<void> {
     const now = Date.now();
-    const markets: MarketSnapshot[] = await Promise.all(
-      this.cfg.symbolList.map(async (symbol) => ({ symbol, price: await getLatestPrice(symbol) })),
-    );
+    // Simple concurrency cap + in-tick cache
+    const priceCache = new Map<string, number>();
+    const symbols = this.cfg.symbolList;
+    const concurrency = Number(process.env.PRICE_CONCURRENCY ?? this.cfg.PRICE_CONCURRENCY ?? 8);
+    const markets: MarketSnapshot[] = [];
+    for (let i = 0; i < symbols.length; i += concurrency) {
+      const batch = symbols.slice(i, i + concurrency);
+      const prices = await Promise.all(
+        batch.map(async (symbol) => {
+          const s = symbol.toUpperCase();
+          if (priceCache.has(s)) return { symbol: s, price: priceCache.get(s)! };
+          const p = await getLatestPrice(s).catch(() => NaN);
+          const price = Number.isFinite(p) ? (p as number) : 0;
+          priceCache.set(s, price);
+          return { symbol: s, price };
+        }),
+      );
+      markets.push(...prices);
+    }
     for (const m of markets) recordMarketSnapshot(now, m.symbol, m.price);
 
     const alpacaPositions = await getPositions().catch(() => []);
@@ -52,6 +68,7 @@ export class Orchestrator {
         continue;
       }
       try {
+        const prevState = getModelState(model.id);
         intents = await model.onDecision({
           markets,
           positions,
@@ -59,6 +76,9 @@ export class Orchestrator {
           maxPositionUsd: this.cfg.MAX_POSITION_USD,
         });
         this.lastCallAtByModel.set(model.id, nowMs);
+        if (this.cfg.enableModelMemory) {
+          updateModelState(model.id, { lastSeenTs: nowMs, summary: prevState.summary });
+        }
       } catch (err) {
         this.logger.error({ err, model: model.id }, 'model decision failed');
         this.applyBackoff(model.id, err);
@@ -79,7 +99,7 @@ export class Orchestrator {
           recordOrder(now, model.id, it.symbol, it.side, it.notionalUsd, 'DRY_RUN');
         } else {
           try {
-            const clientId = `${model.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const clientId = `ov-${model.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             // If queuing off-hours is enabled, use BUY limit GTC qty=1 at current price
             if (this.cfg.queueOffHours || !clock.is_open) {
               const px = price;
@@ -105,14 +125,43 @@ export class Orchestrator {
       }
     }
 
-    // equity snapshots (simplified: positions MTM + assumed starting cash, ignoring fees)
-    for (const model of this.models) {
-      let equity = this.cfg.STARTING_CASH_PER_MODEL;
-      for (const p of positions) {
-        const price = markets.find((m) => m.symbol === p.symbol)?.price ?? 0;
-        equity += p.qty * price;
+    // equity snapshots per model from model-attributed fills (cash + MTM)
+    const fills = getFillsOrdered();
+    const priceBySymbol = new Map<string, number>();
+    for (const m of markets) priceBySymbol.set(m.symbol.toUpperCase(), m.price);
+    const cashByModel = new Map<string, number>();
+    const qtyByModelSymbol = new Map<string, Map<string, number>>();
+    for (const id of this.cfg.modelList) {
+      cashByModel.set(id, this.cfg.STARTING_CASH_PER_MODEL);
+      qtyByModelSymbol.set(id, new Map());
+    }
+    for (const f of fills) {
+      if (!f.model || f.model === 'unknown') continue;
+      if (!cashByModel.has(f.model)) {
+        cashByModel.set(f.model, this.cfg.STARTING_CASH_PER_MODEL);
+        qtyByModelSymbol.set(f.model, new Map());
       }
-      recordEquitySnapshot(now, model.id, equity);
+      const symbol = f.symbol.toUpperCase();
+      const qtyMap = qtyByModelSymbol.get(f.model)!;
+      const prevQty = qtyMap.get(symbol) ?? 0;
+      const tradeQty = Number(f.qty);
+      const tradeValue = tradeQty * Number(f.price);
+      if (f.side === 'buy') {
+        qtyMap.set(symbol, prevQty + tradeQty);
+        cashByModel.set(f.model, (cashByModel.get(f.model) ?? 0) - tradeValue);
+      } else {
+        qtyMap.set(symbol, prevQty - tradeQty);
+        cashByModel.set(f.model, (cashByModel.get(f.model) ?? 0) + tradeValue);
+      }
+    }
+    for (const id of this.cfg.modelList) {
+      const qtyMap = qtyByModelSymbol.get(id) ?? new Map();
+      let equity = cashByModel.get(id) ?? this.cfg.STARTING_CASH_PER_MODEL;
+      for (const [sym, q] of qtyMap.entries()) {
+        const px = priceBySymbol.get(sym) ?? 0;
+        equity += q * px;
+      }
+      recordEquitySnapshot(now, id, equity);
     }
     // sync fills to compute realized pnl later
     await this.syncFills();
@@ -127,9 +176,9 @@ export class Orchestrator {
       const t = Date.parse(a.transaction_time);
       if (isNaN(t)) continue;
       if (t > Date.parse(maxIso)) maxIso = a.transaction_time;
-      // We don't have a direct client_id->model mapping in response always; best effort only.
-      // For now record without model lookup; in production you’d join via order_client_map.
-      recordFill(t, 'unknown', a.symbol, a.side, Number(a.qty), Number(a.price));
+      const mapping = a.client_order_id ? findModelForClientOrder(a.client_order_id) : null;
+      const modelId = mapping?.model ?? 'unknown';
+      recordFill(t, modelId, a.symbol, a.side, Number(a.qty), Number(a.price));
     }
     setLastFillTimestamp(maxIso);
   }
@@ -157,6 +206,17 @@ export class Orchestrator {
   start(): void {
     const interval = Math.max(this.cfg.DECISION_INTERVAL_MS, 5_000);
     this.logger.info({ intervalMs: interval, symbols: this.cfg.symbolList }, 'orchestrator start');
+    // Seed equity so the dashboard never shows 0 models after cold starts
+    const now = Date.now();
+    for (const model of this.models) {
+      try {
+        recordEquitySnapshot(now, model.id, this.cfg.STARTING_CASH_PER_MODEL);
+      } catch {
+        // ignore seed write errors
+      }
+    }
+    // Kick an immediate tick so snapshots/orders begin without waiting a full interval
+    void this.tick();
     setInterval(() => {
       void this.tick();
     }, interval);

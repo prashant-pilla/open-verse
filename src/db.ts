@@ -58,6 +58,12 @@ export function initDb(): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS model_state (
+      model TEXT PRIMARY KEY,
+      state_json TEXT NOT NULL,
+      updated_ts INTEGER NOT NULL
+    );
   `);
   // Initialize optional Postgres mirror
   try {
@@ -172,6 +178,32 @@ export function getFillsOrdered(): Array<{
     qty: number;
     price: number;
   }>;
+}
+
+export function getModelState(model: string): { summary?: string; lastSeenTs?: number } {
+  const d = getDb();
+  const row = d
+    .prepare(`SELECT state_json FROM model_state WHERE model = ?`)
+    .get(model) as { state_json: string } | undefined;
+  if (!row) return {};
+  try {
+    return JSON.parse(row.state_json) as { summary?: string; lastSeenTs?: number };
+  } catch {
+    return {};
+  }
+}
+
+export function updateModelState(model: string, patch: { summary?: string; lastSeenTs?: number }): void {
+  const d = getDb();
+  const prev = getModelState(model);
+  const next = { ...prev, ...patch };
+  const json = JSON.stringify(next);
+  const ts = Date.now();
+  d.prepare(
+    `INSERT INTO model_state (model, state_json, updated_ts)
+     VALUES (?, ?, ?)
+     ON CONFLICT(model) DO UPDATE SET state_json=excluded.state_json, updated_ts=excluded.updated_ts`,
+  ).run(model, json, ts);
 }
 
 export function getRecentOrders(limit = 20): Array<{
